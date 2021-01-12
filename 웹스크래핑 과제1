@@ -1,0 +1,25 @@
+#### 네이버 영화 리뷰 스크래핑 과제1#### 
+setwd("C:/Rtest") 
+install.packages(c('httr','rvest','xml2','stringr')) 
+library(httr); library(rvest); library(xml2); library(stringr)
+
+all.reviews <- c() 
+reviews <- c()
+
+#10 page loop 
+for(i in 1:10){ 
+  url <- paste0("https://movie.naver.com/movie/point/af/list.nhn?st=mcode&sword=30688&target=after&page=",i) 
+  res <- GET(url) 
+  h <- read_html(res, encoding = "CP949") 
+  table <- html_nodes(h,'.list_netizen') 
+  content <- html_nodes(table,'.title') 
+  reviews <- html_text(content) 
+  if(length(reviews)==0){break} 
+  reviews <- str_trim(reviews) 
+  all.reviews <- c(all.reviews, reviews) 
+  print(i)
+}
+
+#### 코드가 길다 ####
+all.reviews
+write.table(all.reviews,'Harry Potter And The Sorcerer Stone.txt')
