@@ -1,0 +1,99 @@
+setwd("C:/Rtest")
+install.packages(c('stringr','stringi','tm','sna','xml2','dplyr','qgraph'))
+
+library(KoNLP) #지난 수업에서 세팅한 KoNLP는 인스톨 없이 라이브러리로 로딩
+library(stringr); library(stringi);library(tm); library(sna);library(xml2);library(qgraph); library(dplyr)
+
+한글 사전은 둘중 하나만 하셔도 됩니다.
+#세종사전은 Kaist에서 만들었고, Nia사전은 한국정보화진흥원에서 만들었어요
+#이 것을 실행시키면 업데이트 하라고 나오는데, 수업에서 말씀 드릴게요.
+useSejongDic() #useNIADic()
+
+데이터 업로딩
+#먼저 지난 시간 웹스크래핑을통해 수집한 데이터를 업로딩 합니다.
+f <- file("Harry Potter And The Sorcerer Stone.txt", encoding="euc-kr") #"UTF-8" 인코딩 방식은 상황에 따라 다르더라구요~
+#더 공부해야 정확히 알 것 같습니다.
+fl <- readLines(f) 
+#이런 식으로는 박찬엽 님의 블로그에서 봤는데, 좋은 것 같습니다.
+close(f) 
+#위 코드처럼 코딩하면, 이 코드가 필요해요.
+
+데이터 전처리
+#불용어 처리
+{
+  fl <- gsub("그리고","",fl); fl <- gsub("너무","",fl); fl <- gsub("정말","",fl);
+  fl <- gsub("진짜","",fl); fl <- gsub("그때","",fl); fl <- gsub("있는","",fl); fl <- gsub("을","",fl);fl <- gsub("를","",fl);
+  fl <- gsub("아는","",fl);fl <- gsub("하는","",fl);fl <- gsub("특히","",fl);fl <- gsub("역시","",fl);
+  fl <- gsub("","",fl); fl <- gsub("했는데","",fl); fl <- gsub("보면","",fl); fl <- gsub("영화","",fl); fl <- gsub("해리포터와 마법사의 돌","",fl);
+  fl <- gsub("해리포터","",fl);  fl <- gsub("포터","",fl); fl <- gsub("마법사의 돌","",fl); fl <- gsub("이거","",fl); fl <- gsub("지금","",fl);
+  fl <- gsub("별점","",fl); fl <- gsub("신고","",fl);
+}
+}
+#비슷한 단어 처리
+fl <- str_replace_all(fl, "[[:punct:]]", "") %>% #단어의 통일도 미리하지 마시고, 결과를 보고 이후에 하는 것이 더 좋아요
+  str_replace_all("배우[들의|들]", "배우") %>%
+  str_replace_all("최고[의|로]", "최고") %>%
+  str_replace_all("시리즈[가|는|중]", "시리즈") %>%
+  str_replace_all("[0-9]+", " ")
+write.table(fl,"preprocessing3.txt")
+
+전처리 완료된 파일 업로드
+f_1 <- file("preprocessing3.txt", encoding="euc-kr") #"UTF-8" 인코딩 방식은 상황에 따라 다르더라구요~
+#더 공부해야 정확히 알 것 같습니다.
+fl_1 <- readLines(f_1) #이런 식으로는 박찬엽 님의 블로그에서 봤는데, 좋은 것 같습니다.
+close(f_1) #위 코드처럼 코딩하면, 이 코드가 필요해요.
+
+fl_1
+
+형태소 분석
+#형태소 분석을 위한 커스텀 함수를 정의합니다.
+#형태소 분석을 하려고 ko.words 라는 이름의 함수를 정의하는 거예요.
+
+ko.words = function(doc){
+  doc = as.character(doc) #데이터를 문자열 타입으로 변환
+  doc2<-SimplePos22(doc) #단어 품사를 22가지로 구분한 SimplePos22함수 적용
+  doc3<-str_match(doc2,"[가-힣]+/NC" ) #그 중 NC(보통명사)만 추출하는 정규식, [가-힣]이 말은 가-힣까지의 단어를 다 보고 그 중 NC만 추출해라는 의미 입니다.
+  doc4<-doc3[,2] #추출한 결과 중 단어만 있는 2열 추출
+  doc4[!is.na(doc4)] #추출한 결과 중 널(NA)값 삭제
+}
+
+options(mc.cores = 1) #멀티코어 사용 안함(의미를 정확히는 아직 모르겠어요.)
+
+cps = Corpus(VectorSource(fl_1)) #Copus 라는 함수를 활용하여 '말뭉치' 라는 개념으로 변환시킴
+
+#이 단계에서 말뭉치를 토큰화 하는데 위에서 정의한 ko.words 함수를 이용합니다.
+#그리고 토큰화 한 다음에 TermDocumentMatrix 함수(명령어)를 활용하여 용어문서행렬로 만들어줍니다.
+tdm <- TermDocumentMatrix(cps, control = list(tokenize = ko.words, #토큰화하는데 위에서 만든 함수(ko.words)사용
+                                              removePunctuation=T,removeNumbers=T, #기호(Punctuation), 숫자 삭제
+                                              wordLengths=c(4,Inf))) #단어 최소 크기가 2글자 초과부터 무한대까지
+
+result <- as.matrix(tdm) #tdm을 matrix 타입으로 변환, 프로그래밍에서 데이터 타입이 중요한데 타입이 안맞으면 함수가 적용되지 않아요.
+
+핵심 키워드(최빈어) 찾기
+#상위빈도 20개 추출(너무 단어가 많아도 그래프 해석이 어렵습니다.)
+#최종 네트워크 그래프를 그릴 때, 단어의 갯수가 너무 많으면
+#그래프 자체가 복잡해져서 해석이 안되요.
+#제 경험 상 15~20개 정도의 단어가 적절합니다.
+
+word.count = rowSums(result)
+word.order = order(word.count, decreasing = T)
+freq.word = result[word.order[1:20],]
+freq.word[,1]
+
+freqency <- data.frame(freq.word)
+write.csv(freqency,"Harry Potter And The Sorcerer Stone.csv") #상위 빈도 20개 추출한 결과를 csv로 저장(빈도 분석을 위해 추후 필요한 경우가 있어요!)
+
+공출현 행렬로 만들기
+#앞 시간에 말씀드린 행렬연산 이예요.
+#전치행렬로 바꾼 다음에 곱셈을 통해 공출현 행렬을 만들어요.
+co.matrix = freq.word %*% t(freq.word) #공출현 행렬 변환(그래프를 그리기 위해 꼭 필요해요)
+co.matrix
+
+공출현 행렬을 그래프로 그리기
+qg<-qgraph(co.matrix,labels=rownames(co.matrix), #그래프 노드의 라벨은 단어의 이름으로
+           diag=F, layout='spring', #그래프 스타일은 spring 타입으로
+           label.cex= 3.0, #라벨의 글씨 크기
+           edge.color='blue', #라벨을 이어주는 선의 색깔은 파랑
+           vsize=log(diag(co.matrix))*1.5) #노드의 사이즈는 중요도에 따라 크기를 조절
+
+plot(qg) #그래프 그리기!
