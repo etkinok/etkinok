@@ -1,0 +1,110 @@
+####참고 블로그 ####
+#이 페이지를 보시면서 결과를 모니터링해보세요.
+#https://refree.github.io/Spam_mail/
+
+#시스템 세팅
+setwd("C:/Rtest")
+
+install.packages(c(rpart","boot","data.table", caret" ))
+#install.packages(c( "rattle", "rpart.plot", "RColorBrewer", "e1071"))
+
+library(dplyr); library(ggplot2); library(MASS); library(rpart); library(boot); library(data.table); library(caret)
+
+####데이터 로드 및 변수 이름 정리####
+data <- tbl_df(read.table("spambase.data", strip.white = TRUE,
+                          sep=",", header = FALSE)) #dplyr 패키지 함수 입니다.
+#해당 파일이 워크디렉토리안에 저장되어 있어야 합니다.
+names(data) <- #Feature의 이름을 입력합니다.
+  c('word_freq_make', 'word_freq_address', 'word_freq_all', 'word_freq_3d', 'word_freq_our',
+    'word_freq_over', 'word_freq_remove', 'word_freq_internet', 'word_freq_order', 'word_freq_mail',
+    'word_freq_receive', 'word_freq_will', 'word_freq_people', 'word_freq_report', 'word_freq_addresses',
+    'word_freq_free', 'word_freq_business', 'word_freq_email', 'word_freq_you', 'word_freq_credit',
+    'word_freq_your', 'word_freq_font', 'word_freq_000', 'word_freq_money', 'word_freq_hp',
+    'word_freq_hpl', 'word_freq_george', 'word_freq_650', 'word_freq_lab', 'word_freq_labs',
+    'word_freq_telnet', 'word_freq_857', 'word_freq_data', 'word_freq_415', 'word_freq_85',
+    'word_freq_technology', 'word_freq_1999', 'word_freq_parts', 'word_freq_pm', 'word_freq_direct',
+    'word_freq_cs', 'word_freq_meeting', 'word_freq_original', 'word_freq_project', 'word_freq_re',
+    'word_freq_edu', 'word_freq_table', 'word_freq_conference', 'char_freq_;', 'char_freq_(',
+    'char_freq_[', 'char_freq_!', 'char_freq_$', 'char_freq_#', 'capital_run_length_average',
+    'capital_run_length_longest', 'capital_run_length_total', 'class' #class 변수가 Label Data 입니다.
+  )
+
+data$class <- factor(data$class) #범주형 변수로 변환(스팸메일 인지/아닌지 이기 때문에 범주형 입니다.)
+
+### 데이터 준비 끝 ###
+####탐색적 데이터 분석 ####
+#저는 탐색적 데이터 분석은 R로 안합니다.
+#Tabluea 라는 툴이 있는데 생각보다 시각화도 잘되고 파워풀 합니다.https://www.tableau.com/ko-kr
+
+glimpse(data) #str(data) 비교해보는 것도 좋을 것 같습니다.
+summary(data)
+
+####상관계수 탐색####
+data_1 <- subset(data, select = c(word_freq_make, word_freq_address, word_freq_all, class))
+#모든 변수를 한꺼번에 그리는 것이 쉽지 않아, 부분적으로 먼저 확인해보겠습니다.
+
+####상관계수 탐색(1)####
+
+#아래 코드는 산점도 행렬의 위쪽에 상관계수 숫자를 집어넣는 사용자 정의 함수 입니다.
+#출처: https://rfriend.tistory.com/83 [R, Python 분석과 프로그래밍의 친구 (by R Friend)]
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r * 5)
+}
+
+pairs(data_1,
+      upper.panel = panel.cor, # 위쪽에는 상관계수 비례)
+      pch="*"
+)
+
+####상관계수 탐색(2)####
+#57개 Feature 중 Label Data의 Class와 상관 관계가 가장 높은 변수는 어떤 변수인지 살펴보겠습니다.
+tmp <- as.data.frame(cor(data[,-58], as.numeric(data$class)))
+tmp <- tmp %>% rename(cor=V1)
+tmp$var <- rownames(tmp)
+tmp %>%
+  ggplot(aes(reorder(var, cor), cor)) +
+  geom_point() +
+  coord_flip()
+
+####의사결정나무분석####
+
+####데이터 분할####
+set.seed(20210118)
+intrain<-createDataPartition(y=data$class, p=0.7, list=FALSE)
+train<-data[intrain, ] #학습용 데이터 셋 70%
+test<-data[-intrain, ] #평가용 데이터 셋 30#
+
+####의사삭사결정나무분석 패키지설치####
+#install.packages(c("rattle", "rpart.plot", "RColorBrewer"))
+library(rattle) #Fancy tree plot
+library(rpart.plot) # Enhanced tree plots
+library(RColorBrewer) # Color selection for fancy tree
+#가끔 rattle패키지가 리눅스 기반에서는 설치 안되는 경우가 있어요.
+
+####트리그리기####
+rpart_spam<-rpart(class~. , data=data, method="class")
+plot(rpart_spam); text(rpart_spam) #원래 rpart 패키지 트리
+
+####트리의 과적합을 방지하기 위해 가지치기####
+printcp(rpart_spam); plotcp(rpart_spam) #과적합 방지를 위해 cp(Complexity Parameter, 복잡성 매개변수)값을 통해 가지치기 실시
+
+rpart_spam_pruning <-prune(rpart_spam,
+                           cp = rpart_spam$cptable[which.min(rpart_spam$cptable[,"xerror"]),"CP"]
+) #cp값으로 가지치기 한 트리 생성
+
+summary(rpart_spam_pruning) #트리 요약값 정리
+
+fancyRpartPlot(rpart_spam_pruning, #fancy한 트리 생성
+               cex = 1
+)
+
+rpart_spam_predict<-predict(rpart_spam_pruning, test, type ='class')
+confusionMatrix(rpart_spam_predict, test$class) #생성된 트리 모형의 평가(정확도, 민감도, 특이도 등)
